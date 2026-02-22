@@ -23,6 +23,18 @@ on:
         description: 'Private npm registry URL (leave empty for default public registry)'
         type: string
         default: ''
+      gcp-project-id:
+        description: 'GCP project ID for Workload Identity Federation (leave empty to skip GCP auth)'
+        type: string
+        default: ''
+      gcp-service-account:
+        description: 'GCP service account for Workload Identity Federation'
+        type: string
+        default: ''
+      gcp-workload-identity-provider:
+        description: 'GCP Workload Identity Provider resource name'
+        type: string
+        default: ''
     secrets:
       NPM_TOKEN:
         description: 'Token for private npm registry (required when npm-registry-url is set)'
@@ -34,11 +46,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       matrix:
         node-version: ['${{ inputs.node-version }}']
     steps:
     - uses: actions/checkout@v4
+    - name: Google Auth
+      if: inputs.gcp-project-id != ''
+      uses: google-github-actions/auth@v2
+      with:
+        project_id: ${{ inputs.gcp-project-id }}
+        service_account: ${{ inputs.gcp-service-account }}
+        workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
     - name: Dependency Review
       uses: actions/dependency-review-action@v4
       with:
