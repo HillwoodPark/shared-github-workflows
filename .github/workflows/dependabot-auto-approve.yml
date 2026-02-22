@@ -1,0 +1,163 @@
+name: Dependabot Auto-merge
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version for build'
+        type: string
+        default: '22.19.0'
+      allowed-licenses:
+        description: 'Comma-separated list of allowed licenses'
+        type: string
+        default: 'Apache-2.0, MIT'
+      fail-on-severity:
+        description: 'Minimum vulnerability severity to block'
+        type: string
+        default: 'moderate'
+      allow-dependencies-licenses:
+        description: 'Packages exempt from license checks (purl format, comma-separated)'
+        type: string
+        default: ''
+      npm-registry-url:
+        description: 'Private npm registry URL (leave empty for default public registry)'
+        type: string
+        default: ''
+    secrets:
+      NPM_TOKEN:
+        description: 'Token for private npm registry (required when npm-registry-url is set)'
+        required: false
+      ANTHROPIC_API_KEY:
+        description: 'Anthropic API key for Claude compatibility review'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['${{ inputs.node-version }}']
+    steps:
+    - uses: actions/checkout@v4
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: ${{ inputs.fail-on-severity }}
+        allow-licenses: ${{ inputs.allowed-licenses }}
+        allow-dependencies-licenses: ${{ inputs.allow-dependencies-licenses }}
+    - name: Use Node.js ${{ matrix.node-version }} (private registry)
+      if: inputs.npm-registry-url != ''
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        registry-url: ${{ inputs.npm-registry-url }}
+    - name: Use Node.js ${{ matrix.node-version }}
+      if: inputs.npm-registry-url == ''
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    - run: npm ci --ignore-scripts
+    - run: npm run build --if-present
+    - run: npm test
+
+  dependabot:
+    needs: [build]
+    runs-on: ubuntu-latest
+    env:
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          compat-lookup: true
+      - name: Auto merge low-risk PRs
+        if: >-
+          ${{
+            (
+              steps.dependabot-metadata.outputs.update-type == 'version-update:semver-patch' ||
+              steps.dependabot-metadata.outputs.update-type == 'version-update:semver-minor'
+            ) && (
+              steps.dependabot-metadata.outputs.compatibility-score == 0 ||
+              steps.dependabot-metadata.outputs.compatibility-score >= 75
+            )
+          }}
+        run: |
+          gh pr merge --auto --merge \
+            -b "Auto-merged ${{steps.dependabot-metadata.outputs.dependency-names}} (${{steps.dependabot-metadata.outputs.update-type}}, ${{steps.dependabot-metadata.outputs.dependency-type}}, compat: ${{steps.dependabot-metadata.outputs.compatibility-score}}%)." \
+            "$PR_URL"
+      - name: Comment on PRs requiring review
+        if: >-
+          ${{
+            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
+            (
+              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
+              steps.dependabot-metadata.outputs.compatibility-score < 75
+            )
+          }}
+        run: |
+          gh pr review --comment \
+            -b "⚠️ **Manual review required.**
+
+          | Signal | Value |
+          |--------|-------|
+          | Package | ${{steps.dependabot-metadata.outputs.dependency-names}} |
+          | Update type | ${{steps.dependabot-metadata.outputs.update-type}} |
+          | Dependency type | ${{steps.dependabot-metadata.outputs.dependency-type}} |
+          | Compatibility score | ${{steps.dependabot-metadata.outputs.compatibility-score}}% |
+
+          This PR was not auto-merged because it is either a major version update or has a low compatibility score (< 75%)." \
+            "$PR_URL"
+
+  claude-review:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          compat-lookup: true
+      - name: Claude compatibility assessment
+        if: >-
+          ${{
+            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
+            (
+              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
+              steps.dependabot-metadata.outputs.compatibility-score < 75
+            )
+          }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allowed_bots: "dependabot[bot]"
+          prompt: |
+            Assess this dependabot dependency update for compatibility risk.
+
+            Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+            Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
+            Compatibility score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}%
+
+            Please:
+            1. Find all imports and usages of this package in the codebase
+            2. Check the package's changelog or release notes for breaking changes
+            3. Assess whether our usage is affected by any breaking changes
+            4. Provide a clear recommendation
+
+            Format your response as:
+            ## Compatibility Assessment
+            **Recommendation:** PASS | FAIL | NEEDS REVIEW
+            **Risk Level:** Low | Medium | High
+            ### Usage in Codebase
+            [list files that import or use this package]
+            ### Breaking Changes Analysis
+            [analysis of changelog/release notes]
+            ### Recommendation Details
+            [explain why you gave this recommendation]
