@@ -62,6 +62,7 @@ jobs:
         service_account: ${{ inputs.gcp-service-account }}
         workload_identity_provider: ${{ inputs.gcp-workload-identity-provider }}
     - name: Dependency Review
+      if: ${{ !github.event.repository.private }}
       uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: ${{ inputs.fail-on-severity }}
