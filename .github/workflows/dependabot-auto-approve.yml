@@ -55,18 +55,22 @@ jobs:
     steps:
     - name: Validate inputs
       run: |
-        if [[ -n "${{ inputs.gcp-project-id }}" ]]; then
-          if [[ -z "${{ inputs.gcp-service-account }}" || -z "${{ inputs.gcp-workload-identity-provider }}" ]]; then
+        if [[ -n "$GCP_PROJECT_ID" ]]; then
+          if [[ -z "$GCP_SERVICE_ACCOUNT" || -z "$GCP_WIF_PROVIDER" ]]; then
             echo "::error::gcp-project-id is set but gcp-service-account or gcp-workload-identity-provider is missing"
             exit 1
           fi
         fi
-        if [[ -n "${{ inputs.npm-registry-url }}" ]]; then
+        if [[ -n "$NPM_REGISTRY_URL" ]]; then
           if [[ -z "$NPM_TOKEN" ]]; then
             echo "::warning::npm-registry-url is set but NPM_TOKEN secret appears empty — npm ci will likely fail"
           fi
         fi
       env:
+        GCP_PROJECT_ID: ${{ inputs.gcp-project-id }}
+        GCP_SERVICE_ACCOUNT: ${{ inputs.gcp-service-account }}
+        GCP_WIF_PROVIDER: ${{ inputs.gcp-workload-identity-provider }}
+        NPM_REGISTRY_URL: ${{ inputs.npm-registry-url }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     - uses: actions/checkout@v4
     - name: Google Auth
@@ -120,10 +124,15 @@ jobs:
           echo "### Dependabot Decision Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "| Signal | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Package | ${{ steps.dependabot-metadata.outputs.dependency-names }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Update type | ${{ steps.dependabot-metadata.outputs.update-type }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Dependency type | ${{ steps.dependabot-metadata.outputs.dependency-type }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Compatibility score | ${{ steps.dependabot-metadata.outputs.compatibility-score }}% |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | $DEP_NAMES |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Update type | $UPDATE_TYPE |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dependency type | $DEP_TYPE |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Compatibility score | ${COMPAT_SCORE}% |" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
+          COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
       - name: Auto merge low-risk PRs
         id: auto-merge
         if: >-
@@ -138,8 +147,13 @@ jobs:
           }}
         run: |
           gh pr merge --auto --merge \
-            -b "Auto-merged ${{steps.dependabot-metadata.outputs.dependency-names}} (${{steps.dependabot-metadata.outputs.update-type}}, ${{steps.dependabot-metadata.outputs.dependency-type}}, compat: ${{steps.dependabot-metadata.outputs.compatibility-score}}%)." \
+            -b "Auto-merged ${DEP_NAMES} (${UPDATE_TYPE}, ${DEP_TYPE}, compat: ${COMPAT_SCORE}%)." \
             "$PR_URL"
+        env:
+          DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
+          COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
       - name: Comment on PRs requiring review
         id: manual-review
         if: >-
@@ -156,13 +170,18 @@ jobs:
 
           | Signal | Value |
           |--------|-------|
-          | Package | ${{steps.dependabot-metadata.outputs.dependency-names}} |
-          | Update type | ${{steps.dependabot-metadata.outputs.update-type}} |
-          | Dependency type | ${{steps.dependabot-metadata.outputs.dependency-type}} |
-          | Compatibility score | ${{steps.dependabot-metadata.outputs.compatibility-score}}% |
+          | Package | ${DEP_NAMES} |
+          | Update type | ${UPDATE_TYPE} |
+          | Dependency type | ${DEP_TYPE} |
+          | Compatibility score | ${COMPAT_SCORE}% |
 
           This PR was not auto-merged because it is either a major version update or has a low compatibility score (< 75%)." \
             "$PR_URL"
+        env:
+          DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
+          COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
       - name: Warn if no action was taken
         if: ${{ steps.auto-merge.outcome == 'skipped' && steps.manual-review.outcome == 'skipped' }}
         run: |
