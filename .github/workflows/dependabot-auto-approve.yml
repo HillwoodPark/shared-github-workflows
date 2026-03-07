@@ -125,6 +125,7 @@ jobs:
           echo "| Dependency type | ${{ steps.dependabot-metadata.outputs.dependency-type }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Compatibility score | ${{ steps.dependabot-metadata.outputs.compatibility-score }}% |" >> "$GITHUB_STEP_SUMMARY"
       - name: Auto merge low-risk PRs
+        id: auto-merge
         if: >-
           ${{
             (
@@ -140,6 +141,7 @@ jobs:
             -b "Auto-merged ${{steps.dependabot-metadata.outputs.dependency-names}} (${{steps.dependabot-metadata.outputs.update-type}}, ${{steps.dependabot-metadata.outputs.dependency-type}}, compat: ${{steps.dependabot-metadata.outputs.compatibility-score}}%)." \
             "$PR_URL"
       - name: Comment on PRs requiring review
+        id: manual-review
         if: >-
           ${{
             steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
@@ -161,6 +163,11 @@ jobs:
 
           This PR was not auto-merged because it is either a major version update or has a low compatibility score (< 75%)." \
             "$PR_URL"
+      - name: Warn if no action was taken
+        if: ${{ steps.auto-merge.outcome == 'skipped' && steps.manual-review.outcome == 'skipped' }}
+        run: |
+          echo "::warning::No auto-merge or review comment was triggered for this PR. Check the decision logic."
+          echo "⚠️ **No action taken** — this PR didn't match auto-merge or manual-review criteria." >> "$GITHUB_STEP_SUMMARY"
 
   claude-review:
     needs: [build]
