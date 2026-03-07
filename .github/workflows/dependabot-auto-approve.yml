@@ -6,7 +6,7 @@ on:
       node-version:
         description: 'Node.js version for build'
         type: string
-        default: '22.19.0'
+        default: '24.14.0'
       allowed-licenses:
         description: 'Comma-separated list of allowed licenses'
         type: string
@@ -72,7 +72,7 @@ jobs:
         GCP_WIF_PROVIDER: ${{ inputs.gcp-workload-identity-provider }}
         NPM_REGISTRY_URL: ${{ inputs.npm-registry-url }}
         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Google Auth
       if: inputs.gcp-project-id != ''
       uses: google-github-actions/auth@v2
@@ -91,14 +91,14 @@ jobs:
       if: inputs.npm-registry-url != ''
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
         registry-url: ${{ inputs.npm-registry-url }}
     - name: Use Node.js ${{ matrix.node-version }}
       if: inputs.npm-registry-url == ''
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -109,6 +109,9 @@ jobs:
   dependabot:
     needs: [build]
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
     env:
       PR_URL: ${{ github.event.pull_request.html_url }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -192,7 +195,6 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
       pull-requests: write
     steps:
