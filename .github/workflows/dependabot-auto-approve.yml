@@ -6,7 +6,7 @@ on:
       node-version:
         description: 'Node.js version for build'
         type: string
-        default: '24.14.0'
+        default: '24.x'
       allowed-licenses:
         description: 'Comma-separated list of allowed licenses'
         type: string
