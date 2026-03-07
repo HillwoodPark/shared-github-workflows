@@ -53,6 +53,21 @@ jobs:
       matrix:
         node-version: ['${{ inputs.node-version }}']
     steps:
+    - name: Validate inputs
+      run: |
+        if [[ -n "${{ inputs.gcp-project-id }}" ]]; then
+          if [[ -z "${{ inputs.gcp-service-account }}" || -z "${{ inputs.gcp-workload-identity-provider }}" ]]; then
+            echo "::error::gcp-project-id is set but gcp-service-account or gcp-workload-identity-provider is missing"
+            exit 1
+          fi
+        fi
+        if [[ -n "${{ inputs.npm-registry-url }}" ]]; then
+          if [[ -z "$NPM_TOKEN" ]]; then
+            echo "::warning::npm-registry-url is set but NPM_TOKEN secret appears empty — npm ci will likely fail"
+          fi
+        fi
+      env:
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     - uses: actions/checkout@v4
     - name: Google Auth
       if: inputs.gcp-project-id != ''
