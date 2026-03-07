@@ -115,6 +115,15 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           compat-lookup: true
+      - name: Log decision inputs
+        run: |
+          echo "### Dependabot Decision Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Signal | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | ${{ steps.dependabot-metadata.outputs.dependency-names }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Update type | ${{ steps.dependabot-metadata.outputs.update-type }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dependency type | ${{ steps.dependabot-metadata.outputs.dependency-type }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Compatibility score | ${{ steps.dependabot-metadata.outputs.compatibility-score }}% |" >> "$GITHUB_STEP_SUMMARY"
       - name: Auto merge low-risk PRs
         if: >-
           ${{
