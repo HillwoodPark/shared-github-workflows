@@ -141,6 +141,9 @@ jobs:
   claude-review:
     needs: [build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v6
 
