@@ -198,6 +198,8 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
+      actions: read
+      
     steps:
       - uses: actions/checkout@v6
 
@@ -208,6 +210,7 @@ jobs:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           compat-lookup: true
       - name: Claude compatibility assessment
+        id: analyze
         if: >-
           ${{
             steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
@@ -248,7 +251,15 @@ jobs:
             ### Recommendation Details
             [explain why you gave this recommendation]
 
-            Add the response as a PR comment and append to $GITHUB_STEP_SUMMARY.
-            
+            Add the response as a PR comment
+
+            Return: recommendation (string), riskLevel (string)
           claude_args: |
-                      --allowedTools "Bash(gh pr comment:*)"
+            --allowedTools "Bash(gh pr comment:*)"
+            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
+      - name: Claude Code Compatibility Summary
+        if: fromJSON(steps.analyze.outputs.structured_output).recommendation
+        run: |
+          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo steps.analyze.outputs.structured_output >> "$GITHUB_STEP_SUMMARY"
+
