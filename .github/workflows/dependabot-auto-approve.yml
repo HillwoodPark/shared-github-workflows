@@ -220,7 +220,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_bots: "dependabot[bot]"
+          track_progress: true
           prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            
             Assess this dependabot dependency update for compatibility risk.
 
             Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}
@@ -243,3 +247,8 @@ jobs:
             [analysis of changelog/release notes]
             ### Recommendation Details
             [explain why you gave this recommendation]
+
+            Add the response as a PR comment and append to $GITHUB_STEP_SUMMARY.
+            
+          claude_args: |
+                      --allowedTools "Bash(gh pr comment:*)"
