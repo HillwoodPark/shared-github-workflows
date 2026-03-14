@@ -260,6 +260,7 @@ jobs:
       - name: Claude Code Compatibility Summary
         if: fromJSON(steps.analyze.outputs.structured_output).recommendation
         run: |
+          OUTPUT='${{ steps.analyze.outputs.structured_output }}'        
           echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo steps.analyze.outputs.structured_output >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
