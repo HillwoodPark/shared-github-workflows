@@ -260,7 +260,10 @@ jobs:
       - name: Claude Code Compatibility Summary
         if: fromJSON(steps.analyze.outputs.structured_output).recommendation
         run: |
-          OUTPUT='${{ steps.analyze.outputs.structured_output }}'        
+          OUTPUT='${{ steps.analyze.outputs.structured_output }}'
+          RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
+          RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
           echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
 
