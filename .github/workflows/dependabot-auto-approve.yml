@@ -124,7 +124,7 @@ jobs:
           compat-lookup: true
       - name: Log decision inputs
         run: |
-          echo "### Dependabot Decision Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Auto-Merge Decision Inputs" >> "$GITHUB_STEP_SUMMARY"
           echo "| Signal | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Package | $DEP_NAMES |" >> "$GITHUB_STEP_SUMMARY"
@@ -158,18 +158,18 @@ jobs:
           DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
           COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
       - name: Comment on PRs requiring review
-        id: manual-review
-        if: >-
-          ${{
-            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
-            (
-              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
-              steps.dependabot-metadata.outputs.compatibility-score < 75
-            )
-          }}
+        id: comment-review-required
+        if: steps.auto-merge.conclusion == 'skipped'
+        env:
+          DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
+          COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
+          RISK_SUMMARY: "This PR requires review because it is either a major version update or has a low compatibility score (< 75%)."
         run: |
+          echo "$RISK_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           gh pr review --comment \
-            -b "⚠️ **Manual review required.**
+            -b "⚠️ **Review required.**
 
           | Signal | Value |
           |--------|-------|
@@ -178,21 +178,17 @@ jobs:
           | Dependency type | ${DEP_TYPE} |
           | Compatibility score | ${COMPAT_SCORE}% |
 
-          This PR was not auto-merged because it is either a major version update or has a low compatibility score (< 75%)." \
+          $RISK_SUMMARY" \
             "$PR_URL"
-        env:
-          DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
-          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
-          DEP_TYPE: ${{ steps.dependabot-metadata.outputs.dependency-type }}
-          COMPAT_SCORE: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
       - name: Warn if no action was taken
-        if: ${{ steps.auto-merge.outcome == 'skipped' && steps.manual-review.outcome == 'skipped' }}
+        if: ${{ steps.auto-merge.outcome == 'skipped' && steps.comment-review-required.outcome == 'skipped' }}
         run: |
           echo "::warning::No auto-merge or review comment was triggered for this PR. Check the decision logic."
-          echo "⚠️ **No action taken** — this PR didn't match auto-merge or manual-review criteria." >> "$GITHUB_STEP_SUMMARY"
+          echo "⚠️ **No action taken** — this PR didn't match auto-merge or comment-review-required criteria." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   claude-review:
-    needs: [build]
+    needs: [dependabot]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -258,7 +254,7 @@ jobs:
             --allowedTools "Bash(gh pr comment:*)"
             --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
       - name: Claude Code Compatibility Summary
-        if: steps.analyze.conclusion == 'success'
+        if: steps.analyze.conclusion != 'skipped'
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
@@ -266,4 +262,8 @@ jobs:
           echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
-
+          if [ "$RECOMMENDATION" == "PASS" ]; then
+            exit 0
+          else
+            exit 1
+          fi
