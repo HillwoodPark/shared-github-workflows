@@ -258,7 +258,7 @@ jobs:
             --allowedTools "Bash(gh pr comment:*)"
             --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
       - name: Claude Code Compatibility Summary
-        if: fromJSON(steps.analyze.outputs.structured_output).recommendation
+        if: steps.analyze.conclusion == 'success'
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
