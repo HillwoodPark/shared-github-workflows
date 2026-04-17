@@ -152,6 +152,8 @@ jobs:
           gh pr merge --auto --merge \
             -b "Auto-merged ${DEP_NAMES} (${UPDATE_TYPE}, ${DEP_TYPE}, compat: ${COMPAT_SCORE}%)." \
             "$PR_URL"
+          echo "🚀 Auto-merged ${DEP_NAMES} (${UPDATE_TYPE}, ${DEP_TYPE}, compat: ${COMPAT_SCORE}%)." >> "$GITHUB_STEP_SUMMARY"
+           
         env:
           DEP_NAMES: ${{ steps.dependabot-metadata.outputs.dependency-names }}
           UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
