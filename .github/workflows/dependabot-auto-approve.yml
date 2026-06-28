@@ -7,6 +7,10 @@ on:
         description: 'Node.js version for build'
         type: string
         default: '24.x'
+      working-directory:
+        description: 'Directory containing package.json / package-lock.json (for monorepo or subdir apps)'
+        type: string
+        default: '.'
       allowed-licenses:
         description: 'Comma-separated list of allowed licenses'
         type: string
@@ -95,6 +99,7 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
         registry-url: ${{ inputs.npm-registry-url }}
     - name: Use Node.js ${{ matrix.node-version }}
       if: inputs.npm-registry-url == ''
@@ -102,9 +107,13 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
     - run: npm ci --ignore-scripts
+      working-directory: ${{ inputs.working-directory }}
     - run: npm run build --if-present
+      working-directory: ${{ inputs.working-directory }}
     - run: npm test
+      working-directory: ${{ inputs.working-directory }}
 
   dependabot:
     needs: [build]
