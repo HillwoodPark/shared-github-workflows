@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Keep the action pins in the reusable workflows (and this repo's own workflows)
+  # current. This repo is the org's supply-chain root, so its `uses:` refs matter
+  # most — a stale/compromised action here propagates to every caller.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    # Supply-chain cooldown: hold new releases 3 days (first-party HillwoodPark exempt)
+    cooldown:
+      default-days: 3
+      exclude:
+        - "HillwoodPark/*"
