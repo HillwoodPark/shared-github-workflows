@@ -226,7 +226,7 @@ jobs:
               steps.dependabot-metadata.outputs.compatibility-score < 75
             )
           }}
-        uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1
+        uses: anthropics/claude-code-action@700e7f8316990de46bed556429765647af760efc # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_bots: "dependabot[bot]"
