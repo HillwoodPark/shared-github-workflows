@@ -262,31 +262,42 @@ jobs:
             ### Recommendation Details
             [explain why you gave this recommendation]
 
-            Add the response as a PR comment
-
-            Return: recommendation (string), riskLevel (string)
+            Return three fields:
+            - recommendation (string): PASS, FAIL, or NEEDS REVIEW
+            - riskLevel (string): Low, Medium, or High
+            - summary (string): the full markdown assessment above (the
+              "## Compatibility Assessment ..." block). The workflow posts this
+              as the PR comment — do NOT post a comment yourself.
           claude_args: |
-            --allowedTools "Bash(gh pr comment:*)"
-            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
+            --allowedTools "Read,Grep,Glob,LS"
+            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"},"summary":{"type":"string"}},"required":["recommendation","riskLevel","summary"]}'
       - name: Claude Code Compatibility Summary
         if: steps.analyze.conclusion != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
           echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
-          # The claude-code-action --json-schema path intermittently returns no
-          # structured_output even when the assessment itself succeeds
-          # (anthropics/claude-code#23265) — and a CI re-run can't escape it,
-          # since each run is a fresh first-invocation. Treat a missing/invalid
-          # object as advisory-only: post a note and don't fail the check. A real
+          # Defense-in-depth: if structured_output is ever missing/invalid, stay
+          # advisory (don't fail the check) rather than red-flagging the PR. A real
           # non-PASS verdict (valid object) still fails the check below.
           if [ -z "$OUTPUT" ] || ! echo "$OUTPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            echo "⚠️ No structured output returned by the assessment (known claude-code-action --json-schema flakiness). See Claude's PR comment for the verdict; not blocking this check." >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ No structured output returned by the assessment; not blocking this check." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
           RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
+          SUMMARY=$(echo "$OUTPUT" | jq -r '.summary // ""')
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
+          # The model runs in automation mode and does not post a comment itself,
+          # so the workflow posts its markdown summary. Edit the bot's existing
+          # comment if there is one (avoids spamming on re-runs), else create it.
+          if [ -n "$SUMMARY" ]; then
+            printf '%s' "$SUMMARY" | gh pr comment "$PR_URL" --edit-last --body-file - 2>/dev/null \
+              || printf '%s' "$SUMMARY" | gh pr comment "$PR_URL" --body-file -
+          fi
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
           else
