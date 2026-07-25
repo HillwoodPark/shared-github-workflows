@@ -231,7 +231,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_bots: "dependabot[bot]"
-          track_progress: true
+          # Do NOT set track_progress: true here — it forces "tag mode"
+          # (comment-updating), which is incompatible with --json-schema and makes
+          # the run return no structured_output (empty $0/1-turn result). Keep this
+          # step in automation mode so the --json-schema verdict is actually produced.
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
