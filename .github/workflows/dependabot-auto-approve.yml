@@ -245,13 +245,46 @@ jobs:
             Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
             Compatibility score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}%
 
+            Find the package's imports/usages in the codebase and check its
+            changelog for breaking changes that affect our usage, then decide.
+
+            Return only two fields: recommendation (PASS, FAIL, or NEEDS REVIEW)
+            and riskLevel (Low, Medium, or High). Do NOT post a comment — a
+            separate step posts the human-readable review. (Keeping this schema
+            tiny is deliberate; a large free-text field can empty the
+            structured_output.)
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,LS"
+            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
+      # Step 2 — the human-readable review comment. Tag mode (track_progress)
+      # posts/updates a rich comment but cannot also emit structured_output,
+      # which is why the gate above is a separate call.
+      - name: Claude review comment
+        if: steps.analyze.conclusion != 'skipped'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@e0cf66d1d257526b5d07f141838c338921cb8455 # v1.0.182
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allowed_bots: "dependabot[bot]"
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Assess this dependabot dependency update and post your assessment as
+            the PR comment.
+
+            Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+            Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
+            Compatibility score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}%
+
             Please:
             1. Find all imports and usages of this package in the codebase
             2. Check the package's changelog or release notes for breaking changes
             3. Assess whether our usage is affected by any breaking changes
             4. Provide a clear recommendation
 
-            Format your response as:
+            Format your comment as:
             ## Compatibility Assessment
             **Recommendation:** PASS | FAIL | NEEDS REVIEW
             **Risk Level:** Low | Medium | High
@@ -261,21 +294,10 @@ jobs:
             [analysis of changelog/release notes]
             ### Recommendation Details
             [explain why you gave this recommendation]
-
-            Return three fields:
-            - recommendation (string): PASS, FAIL, or NEEDS REVIEW
-            - riskLevel (string): Low, Medium, or High
-            - summary (string): the full markdown assessment above (the
-              "## Compatibility Assessment ..." block). The workflow posts this
-              as the PR comment — do NOT post a comment yourself.
           claude_args: |
             --allowedTools "Read,Grep,Glob,LS"
-            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"},"summary":{"type":"string"}},"required":["recommendation","riskLevel","summary"]}'
       - name: Claude Code Compatibility Summary
         if: steps.analyze.conclusion != 'skipped'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
           echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
@@ -288,20 +310,10 @@ jobs:
           fi
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
           RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
-          SUMMARY=$(echo "$OUTPUT" | jq -r '.summary // ""')
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
-          # The model runs in automation mode and does not post a comment itself,
-          # so the workflow posts the verdict (+ summary when present).
-          BODY_FILE="$RUNNER_TEMP/claude-comment.md"
-          {
-            printf '## Claude dependency compatibility assessment\n\n'
-            printf '**Recommendation:** %s  \n' "$RECOMMENDATION"
-            printf '**Risk Level:** %s\n\n' "$RISKLEVEL"
-            [ -n "$SUMMARY" ] && printf '%s\n' "$SUMMARY"
-          } > "$BODY_FILE"
-          echo "DEBUG recommendation=[$RECOMMENDATION] risk=[$RISKLEVEL] summary_bytes=${#SUMMARY} body_bytes=$(wc -c < "$BODY_FILE")"
-          gh pr comment "$PR_URL" --body-file "$BODY_FILE"
+          # Gate: a genuine non-PASS verdict reds the check. (The human-readable
+          # review comment is posted by the separate track_progress step above.)
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
           else
