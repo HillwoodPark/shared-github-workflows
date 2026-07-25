@@ -265,9 +265,11 @@ jobs:
             Return three fields:
             - recommendation (string): PASS, FAIL, or NEEDS REVIEW
             - riskLevel (string): Low, Medium, or High
-            - summary (string): the full markdown assessment above (the
-              "## Compatibility Assessment ..." block). The workflow posts this
-              as the PR comment — do NOT post a comment yourself.
+            - summary (string): a CONCISE plain-text summary, 3-5 sentences —
+              the key usages you found, any breaking changes, and why you chose
+              this recommendation. Keep it short; do NOT paste the full markdown
+              template. The workflow posts this as the PR comment, so do NOT post
+              a comment yourself.
           claude_args: |
             --allowedTools "Read,Grep,Glob,LS"
             --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"},"summary":{"type":"string"}},"required":["recommendation","riskLevel","summary"]}'
@@ -300,7 +302,6 @@ jobs:
             printf '**Risk Level:** %s\n\n' "$RISKLEVEL"
             [ -n "$SUMMARY" ] && printf '%s\n' "$SUMMARY"
           } > "$BODY_FILE"
-          echo "DEBUG recommendation=[$RECOMMENDATION] risk=[$RISKLEVEL] summary_bytes=${#SUMMARY} body_bytes=$(wc -c < "$BODY_FILE")"
           gh pr comment "$PR_URL" --body-file "$BODY_FILE"
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
