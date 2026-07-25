@@ -292,12 +292,16 @@ jobs:
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
           # The model runs in automation mode and does not post a comment itself,
-          # so the workflow posts its markdown summary. Edit the bot's existing
-          # comment if there is one (avoids spamming on re-runs), else create it.
-          if [ -n "$SUMMARY" ]; then
-            printf '%s' "$SUMMARY" | gh pr comment "$PR_URL" --edit-last --body-file - 2>/dev/null \
-              || printf '%s' "$SUMMARY" | gh pr comment "$PR_URL" --body-file -
-          fi
+          # so the workflow posts the verdict (+ summary when present). Always post,
+          # editing the bot's existing comment to avoid spamming on re-runs.
+          {
+            printf '## Claude dependency compatibility assessment\n\n'
+            printf '**Recommendation:** %s  \n' "$RECOMMENDATION"
+            printf '**Risk Level:** %s\n\n' "$RISKLEVEL"
+            [ -n "$SUMMARY" ] && printf '%s\n' "$SUMMARY"
+          } > "$RUNNER_TEMP/claude-comment.md"
+          gh pr comment "$PR_URL" --edit-last --body-file "$RUNNER_TEMP/claude-comment.md" 2>/dev/null \
+            || gh pr comment "$PR_URL" --body-file "$RUNNER_TEMP/claude-comment.md"
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
           else
