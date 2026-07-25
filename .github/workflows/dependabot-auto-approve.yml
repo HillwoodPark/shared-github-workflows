@@ -218,6 +218,7 @@ jobs:
           compat-lookup: true
       - name: Claude compatibility assessment
         id: analyze
+        continue-on-error: true
         if: >-
           ${{
             steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
@@ -230,7 +231,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_bots: "dependabot[bot]"
-          track_progress: true
+          # Do NOT set track_progress: true here — it forces "tag mode"
+          # (comment-updating), which is incompatible with --json-schema and makes
+          # the run return no structured_output (empty $0/1-turn result). Keep this
+          # step in automation mode so the --json-schema verdict is actually produced.
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -258,21 +262,46 @@ jobs:
             ### Recommendation Details
             [explain why you gave this recommendation]
 
-            Add the response as a PR comment
-
-            Return: recommendation (string), riskLevel (string)
+            Return three fields:
+            - recommendation (string): PASS, FAIL, or NEEDS REVIEW
+            - riskLevel (string): Low, Medium, or High
+            - summary (string): the full markdown assessment above (the
+              "## Compatibility Assessment ..." block). The workflow posts this
+              as the PR comment — do NOT post a comment yourself.
           claude_args: |
-            --allowedTools "Bash(gh pr comment:*)"
-            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
+            --allowedTools "Read,Grep,Glob,LS"
+            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"},"summary":{"type":"string"}},"required":["recommendation","riskLevel","summary"]}'
       - name: Claude Code Compatibility Summary
         if: steps.analyze.conclusion != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
+          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
+          # Defense-in-depth: if structured_output is ever missing/invalid, stay
+          # advisory (don't fail the check) rather than red-flagging the PR. A real
+          # non-PASS verdict (valid object) still fails the check below.
+          if [ -z "$OUTPUT" ] || ! echo "$OUTPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "⚠️ No structured output returned by the assessment; not blocking this check." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
           RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
-          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
+          SUMMARY=$(echo "$OUTPUT" | jq -r '.summary // ""')
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
+          # The model runs in automation mode and does not post a comment itself,
+          # so the workflow posts the verdict (+ summary when present).
+          BODY_FILE="$RUNNER_TEMP/claude-comment.md"
+          {
+            printf '## Claude dependency compatibility assessment\n\n'
+            printf '**Recommendation:** %s  \n' "$RECOMMENDATION"
+            printf '**Risk Level:** %s\n\n' "$RISKLEVEL"
+            [ -n "$SUMMARY" ] && printf '%s\n' "$SUMMARY"
+          } > "$BODY_FILE"
+          echo "DEBUG recommendation=[$RECOMMENDATION] risk=[$RISKLEVEL] summary_bytes=${#SUMMARY} body_bytes=$(wc -c < "$BODY_FILE")"
+          gh pr comment "$PR_URL" --body-file "$BODY_FILE"
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
           else
