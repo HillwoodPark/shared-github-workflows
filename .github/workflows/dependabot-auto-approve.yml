@@ -245,27 +245,13 @@ jobs:
             Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
             Compatibility score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}%
 
-            Please:
-            1. Find all imports and usages of this package in the codebase
-            2. Check the package's changelog or release notes for breaking changes
-            3. Assess whether our usage is affected by any breaking changes
-            4. Provide a clear recommendation
-
-            Format your response as:
-            ## Compatibility Assessment
-            **Recommendation:** PASS | FAIL | NEEDS REVIEW
-            **Risk Level:** Low | Medium | High
-            ### Usage in Codebase
-            [list files that import or use this package]
-            ### Breaking Changes Analysis
-            [analysis of changelog/release notes]
-            ### Recommendation Details
-            [explain why you gave this recommendation]
+            Find the package's imports/usages in the codebase and check its
+            changelog for breaking changes that affect our usage, then decide.
 
             Return only two fields: recommendation (PASS, FAIL, or NEEDS REVIEW)
             and riskLevel (Low, Medium, or High). Do NOT post a comment — a
             separate step posts the human-readable review. (Keeping this schema
-            tiny is deliberate: adding a large free-text field empties the
+            tiny is deliberate; a large free-text field can empty the
             structured_output.)
           claude_args: |
             --allowedTools "Read,Grep,Glob,LS"
