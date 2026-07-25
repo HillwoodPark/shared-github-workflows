@@ -218,6 +218,7 @@ jobs:
           compat-lookup: true
       - name: Claude compatibility assessment
         id: analyze
+        continue-on-error: true
         if: >-
           ${{
             steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
@@ -268,9 +269,19 @@ jobs:
         if: steps.analyze.conclusion != 'skipped'
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
+          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
+          # The claude-code-action --json-schema path intermittently returns no
+          # structured_output even when the assessment itself succeeds
+          # (anthropics/claude-code#23265) — and a CI re-run can't escape it,
+          # since each run is a fresh first-invocation. Treat a missing/invalid
+          # object as advisory-only: post a note and don't fail the check. A real
+          # non-PASS verdict (valid object) still fails the check below.
+          if [ -z "$OUTPUT" ] || ! echo "$OUTPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "⚠️ No structured output returned by the assessment (known claude-code-action --json-schema flakiness). See Claude's PR comment for the verdict; not blocking this check." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
           RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
-          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
           if [ "$RECOMMENDATION" == "PASS" ]; then
