@@ -307,7 +307,11 @@ jobs:
             Add the response as a PR comment
 
             Return: recommendation (string), riskLevel (string)
+          # Pin the review model to Sonnet 5 via claude_args (this action exposes
+          # no `model:` input). Sonnet handles the dependency-compat verdict at
+          # ~40-60% lower cost than the Opus default. Cost lever, 2026-07.
           claude_args: |
+            --model claude-sonnet-5
             --allowedTools "Bash(gh pr comment:*)"
             --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
       - name: Claude Code Compatibility Summary
