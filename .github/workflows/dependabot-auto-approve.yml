@@ -216,9 +216,54 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           compat-lookup: true
+      # Preflight: confirm the Anthropic API key can actually make a call before
+      # the costly review. A rejected key / out-of-credit account otherwise makes
+      # claude-code-action fail opaquely ($0 cost, is_error -> "did not return
+      # structured_output"). This turns that into a clear, actionable message.
+      - name: Verify Anthropic API key is usable
+        id: anthropic-preflight
+        if: >-
+          ${{
+            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
+            (
+              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
+              steps.dependabot-metadata.outputs.compatibility-score < 75
+            )
+          }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Minimal 1-token call. 200 = key+account OK. 401 = bad key.
+          # 400/402 = no credit / billing. Other codes = treat as transient (don't block).
+          code=$(curl -sS -m 30 -o "$RUNNER_TEMP/preflight.json" -w '%{http_code}' \
+            https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d '{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}' \
+            || echo "000")
+          echo "Anthropic preflight: HTTP $code"
+          [ "$code" = "200" ] && { echo "Key/account OK."; exit 0; }
+          ERR=$(jq -r '.error.message // .error.type // empty' "$RUNNER_TEMP/preflight.json" 2>/dev/null)
+          case "$code" in
+            401) HINT="The ANTHROPIC_API_KEY is invalid or revoked — rotate it and update the secret." ;;
+            400|402) HINT="The Anthropic account likely has no credit or a billing issue. Check the balance and billing at https://console.anthropic.com/settings/billing" ;;
+            *) echo "::warning::Anthropic preflight inconclusive (HTTP $code${ERR:+: $ERR}); letting the review run."; exit 0 ;;
+          esac
+          {
+            printf '## ⚠️ Claude dependency review could not run — Anthropic API rejected the key\n\n'
+            printf 'A preflight call to the Anthropic API failed (**HTTP %s**%s).\n\n' "$code" "${ERR:+: $ERR}"
+            printf '**%s**\n\n' "$HINT"
+            printf 'The `ANTHROPIC_API_KEY` secret is present, so this is almost always an account/billing problem, not a GitHub-config problem. Re-run with `@dependabot recreate` once it is healthy.\n\n'
+            printf '<sub>Without this preflight, the review step fails opaquely with a $0-cost "did not return structured_output" error.</sub>\n'
+          } > "$RUNNER_TEMP/preflight-comment.md"
+          gh pr comment "$PR_URL" --body-file "$RUNNER_TEMP/preflight-comment.md" || true
+          echo "::error::Anthropic preflight failed (HTTP $code). $HINT"
+          exit 1
       - name: Claude compatibility assessment
         id: analyze
-        continue-on-error: true
         if: >-
           ${{
             steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
@@ -231,48 +276,12 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_bots: "dependabot[bot]"
-          # Do NOT set track_progress: true here — it forces "tag mode"
-          # (comment-updating), which is incompatible with --json-schema and makes
-          # the run return no structured_output (empty $0/1-turn result). Keep this
-          # step in automation mode so the --json-schema verdict is actually produced.
+          track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
             
             Assess this dependabot dependency update for compatibility risk.
-
-            Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}
-            Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
-            Compatibility score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}%
-
-            Find the package's imports/usages in the codebase and check its
-            changelog for breaking changes that affect our usage, then decide.
-
-            Return only two fields: recommendation (PASS, FAIL, or NEEDS REVIEW)
-            and riskLevel (Low, Medium, or High). Do NOT post a comment — a
-            separate step posts the human-readable review. (Keeping this schema
-            tiny is deliberate; a large free-text field can empty the
-            structured_output.)
-          claude_args: |
-            --allowedTools "Read,Grep,Glob,LS"
-            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
-      # Step 2 — the human-readable review comment. Tag mode (track_progress)
-      # posts/updates a rich comment but cannot also emit structured_output,
-      # which is why the gate above is a separate call.
-      - name: Claude review comment
-        if: steps.analyze.conclusion != 'skipped'
-        continue-on-error: true
-        uses: anthropics/claude-code-action@e0cf66d1d257526b5d07f141838c338921cb8455 # v1.0.182
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_bots: "dependabot[bot]"
-          track_progress: true
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
-
-            Assess this dependabot dependency update and post your assessment as
-            the PR comment.
 
             Package: ${{ steps.dependabot-metadata.outputs.dependency-names }}
             Update type: ${{ steps.dependabot-metadata.outputs.update-type }}
@@ -284,7 +293,7 @@ jobs:
             3. Assess whether our usage is affected by any breaking changes
             4. Provide a clear recommendation
 
-            Format your comment as:
+            Format your response as:
             ## Compatibility Assessment
             **Recommendation:** PASS | FAIL | NEEDS REVIEW
             **Risk Level:** Low | Medium | High
@@ -294,26 +303,22 @@ jobs:
             [analysis of changelog/release notes]
             ### Recommendation Details
             [explain why you gave this recommendation]
+
+            Add the response as a PR comment
+
+            Return: recommendation (string), riskLevel (string)
           claude_args: |
-            --allowedTools "Read,Grep,Glob,LS"
+            --allowedTools "Bash(gh pr comment:*)"
+            --json-schema '{"type":"object","properties":{"recommendation":{"type":"string"},"riskLevel":{"type":"string"}},"required":["recommendation","riskLevel"]}'
       - name: Claude Code Compatibility Summary
         if: steps.analyze.conclusion != 'skipped'
         run: |
           OUTPUT='${{ steps.analyze.outputs.structured_output }}'
-          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
-          # Defense-in-depth: if structured_output is ever missing/invalid, stay
-          # advisory (don't fail the check) rather than red-flagging the PR. A real
-          # non-PASS verdict (valid object) still fails the check below.
-          if [ -z "$OUTPUT" ] || ! echo "$OUTPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
-            echo "⚠️ No structured output returned by the assessment; not blocking this check." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           RISKLEVEL=$(echo "$OUTPUT" | jq -r '.riskLevel')
           RECOMMENDATION=$(echo "$OUTPUT" | jq -r '.recommendation')
+          echo "### Claude Code Compatibility Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "Risk Level: $RISKLEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "Recommendation: $RECOMMENDATION" >> "$GITHUB_STEP_SUMMARY"
-          # Gate: a genuine non-PASS verdict reds the check. (The human-readable
-          # review comment is posted by the separate track_progress step above.)
           if [ "$RECOMMENDATION" == "PASS" ]; then
             exit 0
           else
