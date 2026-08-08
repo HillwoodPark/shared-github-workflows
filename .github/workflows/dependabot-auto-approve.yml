@@ -4,9 +4,13 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version for build'
+        description: 'Node.js version for build (ignored when node-version-file is set)'
         type: string
         default: '24.x'
+      node-version-file:
+        description: 'Path to a file holding the Node.js version, relative to the repo root (e.g. .nvmrc). Takes precedence over node-version.'
+        type: string
+        default: ''
       working-directory:
         description: 'Directory containing package.json / package-lock.json (for monorepo or subdir apps)'
         type: string
@@ -53,9 +57,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    strategy:
-      matrix:
-        node-version: ['${{ inputs.node-version }}']
     steps:
     - name: Validate inputs
       run: |
@@ -91,21 +92,25 @@ jobs:
         fail-on-severity: ${{ inputs.fail-on-severity }}
         allow-licenses: ${{ inputs.allowed-licenses }}
         allow-dependencies-licenses: ${{ inputs.allow-dependencies-licenses }}
-    - name: Use Node.js ${{ matrix.node-version }} (private registry)
+    # Exactly one of node-version / node-version-file is ever non-empty: setup-node
+    # silently prefers node-version when both are set, which would defeat the file.
+    - name: Use Node.js from ${{ inputs.node-version-file || inputs.node-version }} (private registry)
       if: inputs.npm-registry-url != ''
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+        node-version-file: ${{ inputs.node-version-file }}
         cache: 'npm'
         cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
         registry-url: ${{ inputs.npm-registry-url }}
-    - name: Use Node.js ${{ matrix.node-version }}
+    - name: Use Node.js from ${{ inputs.node-version-file || inputs.node-version }}
       if: inputs.npm-registry-url == ''
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+        node-version-file: ${{ inputs.node-version-file }}
         cache: 'npm'
         cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
     - run: npm ci --ignore-scripts
