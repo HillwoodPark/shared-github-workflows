@@ -9,6 +9,11 @@ name: Workflow Lint
 
 on:
   pull_request:
+    # `edited` covers base-branch retargeting: when a stacked PR's base merges, GitHub
+    # retargets the PR to main and fires `edited`, which is not one of the default
+    # activity types. Without it this required check never reports and the PR is
+    # permanently blocked on a status that can no longer arrive.
+    types: [opened, synchronize, reopened, edited]
     branches: [main]
   push:
     branches: [main]
