@@ -88,6 +88,8 @@ The bump is the **highest `release:*` label across every merged PR since the lat
 
 Then: if the PR that produced *this* push is `release:skip`, no tag is cut and everything accumulated waits — so label the next PR for the highest change in the whole range, not just its own. Otherwise the highest contribution wins.
 
+If in doubt about a third-party action bump (a Dependabot PR here is exactly that), label it `release:skip` so it rides with the next reviewed release instead of going out as an unattended patch — that label is the one manual lever over the Dependabot default.
+
 Why the whole range: a run can fail or be cancelled (the concurrency group holds one pending run; a third rapid push cancels it). With head-PR-only logic, the next unlabelled Dependabot merge would ship a lost `release:major` change as a patch and it would auto-merge everywhere. The range logic makes a lost run harmless — the next run releases the backlog at the right level. The fail-loud rule is equally deliberate: a forgotten tag would silently stop propagation of everything after it, including security bumps. Do not soften either to a warning.
 
 Mechanics worth knowing:
