@@ -18,6 +18,8 @@
 # to HillwoodPark/shared-github-workflows), DRY_RUN, RANGE_BASE (DRY_RUN only),
 # GITHUB_STEP_SUMMARY, ALLOW_LOCAL_RELEASE (create for real outside Actions).
 set -euo pipefail
+# A set -e exit with no message is undiagnosable from the Actions log; name the line.
+trap 'echo "::error::release.sh failed at line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 REPO="${GITHUB_REPOSITORY:-HillwoodPark/shared-github-workflows}"
 DEPENDABOT_LOGIN='dependabot[bot]'
@@ -180,7 +182,13 @@ main() {
       missing="${missing} #${number} by ${author} (no release:* label)"$'\n'
     else
       bumps="${bumps} ${bump}"
-      report="${report} #${number}=${bump}$([[ -z "$labels" ]] && echo ' (Dependabot default)')"
+      # No `$([[ … ]] && …)` here: a false test inside a command substitution
+      # makes the assignment itself return 1, and set -e exits silently.
+      if [[ -z "$labels" ]]; then
+        report="${report} #${number}=${bump} (Dependabot default)"
+      else
+        report="${report} #${number}=${bump}"
+      fi
     fi
   done
   echo "PRs since ${latest}:${report:- none}"
