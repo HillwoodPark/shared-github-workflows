@@ -1,0 +1,35 @@
+# Cut a semver tag + GitHub release for every merge to main, so callers'
+# Dependabot sees real version bumps instead of SHA-to-SHA changes and can
+# auto-merge patch/minor releases. Decision logic (labels, Dependabot default,
+# fail-loud on unlabelled human PRs) lives in .github/scripts/release.sh —
+# see CLAUDE.md "Releases".
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+# Back-to-back merges must compute "latest tag" one at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the tag + release
+      pull-requests: read    # read the merged PR's author and labels
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cut release
+        run: .github/scripts/release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}

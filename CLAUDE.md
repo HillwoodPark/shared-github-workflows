@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Reusable GitHub Actions workflows shared across HillwoodPark repositories. There is no application code — no `package.json`, no source tree, no test suite. The deliverable is `.github/workflows/dependabot-auto-approve.yml`, a `workflow_call` reusable workflow that other repos invoke.
+Reusable GitHub Actions workflows shared across HillwoodPark repositories. There is no application code — no `package.json`, no source tree, no test suite. The deliverable is `.github/workflows/dependabot-auto-approve.yml`, a `workflow_call` reusable workflow that other repos invoke. `.github/workflows/release.yml` (+ `.github/scripts/release.sh`) tags each merge to `main` as a semver release so callers can consume it — see [Releases](#releases).
 
 **Every change here is org-wide.** Treat this repo as the org's supply-chain root: a stale or compromised `uses:` ref here propagates to every caller. Its own `.github/dependabot.yml` says exactly that.
 
@@ -20,7 +20,17 @@ grep -rnE '^[[:space:]]*pull_request_target[[:space:]]*:' .github/workflows/   #
 pipx run zizmor==1.26.1 --persona=regular --min-severity=high .github/workflows/
 ```
 
-`actionlint` (run bare from the repo root; it auto-discovers `.github/workflows/` and rejects a directory argument) is not in CI but is worth running locally — it type-checks `${{ }}` expressions and catches unknown `steps.<id>` references, which zizmor does not. It cannot validate individual action *output names* (they're typed `{string => string}`); check those against the action's own `action.yml` `outputs:` block.
+`release.sh` has its own checks — run all three before touching it:
+
+```bash
+.github/scripts/release.sh --self-test                     # table-driven tests of the label/version logic
+pipx run --spec shellcheck-py shellcheck .github/scripts/release.sh
+DRY_RUN=1 SHA=<a merge commit on main> .github/scripts/release.sh   # real API lookups, creates nothing
+```
+
+Keep the script bash-3.2 clean (macOS `/bin/bash`) even though the runner has bash 5 — the self-test is only useful if it runs locally. Empty arrays under `set -u` need the `${arr[@]+"${arr[@]}"}` idiom.
+
+`actionlint` (`pipx run --spec actionlint-py actionlint`, or run bare from the repo root; it auto-discovers `.github/workflows/` and rejects a directory argument) is not in CI but is worth running locally — it type-checks `${{ }}` expressions and catches unknown `steps.<id>` references, which zizmor does not. It cannot validate individual action *output names* (they're typed `{string => string}`); check those against the action's own `action.yml` `outputs:` block.
 
 `workflow-lint.yml` triggers on `pull_request` types `[opened, synchronize, reopened, edited]`. The `edited` type is deliberate and load-bearing — see the comment in that file before touching it.
 
@@ -62,9 +72,47 @@ A hand-authored PR cannot exercise this job at all. Callers gate the whole reusa
 
 To exercise it now rather than waiting for the daily schedule, comment `@dependabot recreate` on an existing Dependabot PR in a caller. Dependabot re-resolves to this repo's current `main` HEAD, and because the resulting PR changes a workflow file, it exercises the validation-skip path too.
 
+## Releases
+
+Every merge to `main` is tagged `vX.Y.Z` by `release.yml`, which runs `release.sh`. The tag is what callers' Dependabot consumes (next section), so **an untagged commit on `main` reaches nobody.**
+
+The bump is the **highest `release:*` label across every merged PR since the latest tag** — not just the PR that produced the push. Labels go on **before** merging:
+
+| Per PR in the range | Contributes |
+|---|---|
+| `release:major` / `release:minor` / `release:patch` | that bump |
+| no label, author `dependabot[bot]` | `patch` |
+| `release:skip` | nothing (deferred) |
+| no label, human author — or a commit with no merged PR (direct push) | **the run fails**; the log names it and prints the three `gh release create …` commands to release by hand |
+| more than one `release:*` label | the run fails |
+
+Then: if the PR that produced *this* push is `release:skip`, no tag is cut and everything accumulated waits — so label the next PR for the highest change in the whole range, not just its own. Otherwise the highest contribution wins.
+
+If in doubt about a third-party action bump (a Dependabot PR here is exactly that), label it `release:skip` so it rides with the next reviewed release instead of going out as an unattended patch — that label is the one manual lever over the Dependabot default.
+
+Why the whole range: a run can fail or be cancelled (the concurrency group holds one pending run; a third rapid push cancels it). With head-PR-only logic, the next unlabelled Dependabot merge would ship a lost `release:major` change as a patch and it would auto-merge everywhere. The range logic makes a lost run harmless — the next run releases the backlog at the right level. The fail-loud rule is equally deliberate: a forgotten tag would silently stop propagation of everything after it, including security bumps. Do not soften either to a warning.
+
+Mechanics worth knowing:
+
+- The range is `compare/{latest}...{sha}`; each commit's merged PR comes from `repos/{repo}/commits/{sha}/pulls` (`merged_at != null`), deduplicated by PR number, so squash, merge-commit and rebase merges all resolve. `status` must be `ahead`; `identical` means already released (exit 0); anything else refuses to guess.
+- `DRY_RUN=1 RANGE_BASE=<older commit>` replays the range logic over history without creating anything — the way to test a change to the decision logic against real PRs.
+- Outside GitHub Actions the script refuses to create a release unless `ALLOW_LOCAL_RELEASE=1`, so a forgotten `DRY_RUN=1` can't cut one with your own credentials.
+- Only tags matching `^v[0-9]+\.[0-9]+\.[0-9]+$` count as the baseline. The old bare `v1` tag was deleted 2026-09 for that reason; don't recreate floating major tags.
+- No `vX.Y.Z` tag at all is a hard error, not an implicit `v0.0.1` — bootstrap by hand with `gh release create v1.0.0 --target <sha> --generate-notes`.
+- `concurrency: release` serializes back-to-back merges so two runs can't compute the same "latest tag".
+- Releases created with `GITHUB_TOKEN` don't trigger other workflows; nothing here needs triggering — Dependabot reads tags directly.
+- **A `release:major` bump is the signal that callers must not auto-merge.** Their Dependabot PR reads "Bump … from 1.x.y to 2.0.0", `update-type` is `semver-major`, the `dependabot` job posts "⚠️ Review required", and `claude-review` self-skips (workflow-file PR — see above). Human review in each caller is the whole point.
+
 ## Propagation to callers
 
 Callers pin by **commit SHA**, so a merge to `main` reaches nobody until each caller's Dependabot bumps its pin. Their `.github/dependabot.yml` files exempt `HillwoodPark/*` from the 3-day supply-chain cooldown specifically so these pin bumps propagate within a day instead of by hand.
+
+How Dependabot treats a SHA-pinned reusable workflow (verified against `dependabot-core`'s `github_actions` package, 2026-09):
+
+- If the pinned SHA **is a tagged commit**, it bumps to the latest `vX.Y.Z` tag. The PR title carries real versions ("from 1.0.1 to 1.0.2"), `fetch-metadata` emits `version-update:semver-patch|minor|major`, and the caller's auto-merge condition applies unchanged — patch/minor merge themselves, major waits for review.
+- If the pinned SHA **is not a tagged commit**, it follows the containing branch's HEAD. The PR is SHA→SHA, and `fetch-metadata` labels it `semver-major` or `''` depending only on whether both SHAs start with a digit — never patch/minor, so it never auto-merges. This was every caller's state before 2026-09; each one needed a single manual merge onto a tagged SHA to cross over.
+- Dependabot needs at least one version-like tag to update SHA pins at all — never let the repo have zero `v*` tags.
+- Bare `@<sha>` pins work without a `# vX.Y.Z` comment: the parser resolves the version by tag lookup. Dependabot won't add a comment on SHA→SHA bumps, so don't expect one.
 
 Check where a change has landed:
 
@@ -80,6 +128,7 @@ done
 Two caveats that command surfaces:
 
 - **This repo's own `dependabot-auto-approve.yml` is the reusable workflow itself, not a caller.** Don't count it.
+- A caller is only on the auto-merge path if its pinned SHA carries a tag — compare against `gh api repos/HillwoodPark/shared-github-workflows/git/matching-refs/tags/v --jq '.[] | "\(.object.sha[0:12]) \(.ref)"'`.
 - **`common-infrastructure` calls it under a different filename** (`report-to-collector-dependabot-auto-merge.yml`), so a filename-based sweep misses it.
 - **`authed` and `authed-target-example` have standalone inlined copies** of the old auto-merge pattern and do not consume this workflow. Changes here do not reach them.
 
