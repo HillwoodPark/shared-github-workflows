@@ -25,7 +25,7 @@ pipx run zizmor==1.26.1 --persona=regular --min-severity=high .github/workflows/
 ```bash
 .github/scripts/release.sh --self-test                     # table-driven tests of the label/version logic
 pipx run --spec shellcheck-py shellcheck .github/scripts/release.sh
-DRY_RUN=1 SHA=<a merge commit on main> .github/scripts/release.sh   # real API lookups, creates nothing
+DRY_RUN=1 SHA=<a merge commit on main> .github/scripts/release.sh   # real API lookups, creates nothing — run it for a labelled PR AND an unlabelled one
 ```
 
 Keep the script bash-3.2 clean (macOS `/bin/bash`) even though the runner has bash 5 — the self-test is only useful if it runs locally. Empty arrays under `set -u` need the `${arr[@]+"${arr[@]}"}` idiom.
