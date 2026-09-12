@@ -76,21 +76,25 @@ To exercise it now rather than waiting for the daily schedule, comment `@dependa
 
 Every merge to `main` is tagged `vX.Y.Z` by `release.yml`, which runs `release.sh`. The tag is what callers' Dependabot consumes (next section), so **an untagged commit on `main` reaches nobody.**
 
-The bump comes from the merged PR's labels, applied **before** merging:
+The bump is the **highest `release:*` label across every merged PR since the latest tag** — not just the PR that produced the push. Labels go on **before** merging:
 
-| PR state | Result |
+| Per PR in the range | Contributes |
 |---|---|
 | `release:major` / `release:minor` / `release:patch` | that bump |
-| `release:skip` | no tag; the commit ships with the next release |
 | no label, author `dependabot[bot]` | `patch` |
-| no label, human author — or a direct push with no PR | **the run fails** and the log prints the three `gh release create …` commands to release by hand |
+| `release:skip` | nothing (deferred) |
+| no label, human author — or a commit with no merged PR (direct push) | **the run fails**; the log names it and prints the three `gh release create …` commands to release by hand |
 | more than one `release:*` label | the run fails |
 
-The fail-loud rule is deliberate: a forgotten tag would silently stop propagation of everything after it, including security bumps. Do not soften it to a warning.
+Then: if the PR that produced *this* push is `release:skip`, no tag is cut and everything accumulated waits — so label the next PR for the highest change in the whole range, not just its own. Otherwise the highest contribution wins.
+
+Why the whole range: a run can fail or be cancelled (the concurrency group holds one pending run; a third rapid push cancels it). With head-PR-only logic, the next unlabelled Dependabot merge would ship a lost `release:major` change as a patch and it would auto-merge everywhere. The range logic makes a lost run harmless — the next run releases the backlog at the right level. The fail-loud rule is equally deliberate: a forgotten tag would silently stop propagation of everything after it, including security bumps. Do not soften either to a warning.
 
 Mechanics worth knowing:
 
-- The PR is found via `repos/{repo}/commits/{sha}/pulls` matched on `merge_commit_sha` — exact for squash merges (this repo's convention), unsupported for rebase/merge-commit merges.
+- The range is `compare/{latest}...{sha}`; each commit's merged PR comes from `repos/{repo}/commits/{sha}/pulls` (`merged_at != null`), deduplicated by PR number, so squash, merge-commit and rebase merges all resolve. `status` must be `ahead`; `identical` means already released (exit 0); anything else refuses to guess.
+- `DRY_RUN=1 RANGE_BASE=<older commit>` replays the range logic over history without creating anything — the way to test a change to the decision logic against real PRs.
+- Outside GitHub Actions the script refuses to create a release unless `ALLOW_LOCAL_RELEASE=1`, so a forgotten `DRY_RUN=1` can't cut one with your own credentials.
 - Only tags matching `^v[0-9]+\.[0-9]+\.[0-9]+$` count as the baseline. The old bare `v1` tag was deleted 2026-09 for that reason; don't recreate floating major tags.
 - No `vX.Y.Z` tag at all is a hard error, not an implicit `v0.0.1` — bootstrap by hand with `gh release create v1.0.0 --target <sha> --generate-notes`.
 - `concurrency: release` serializes back-to-back merges so two runs can't compute the same "latest tag".
