@@ -40,7 +40,7 @@ Three jobs, strictly sequential via `needs:` — `build` → `dependabot` → `c
 
 - **`build`** — dependency review, Node setup, `npm ci --ignore-scripts`, build, test. Optionally authenticates to GCP via Workload Identity Federation when the caller passes all three `gcp-*` inputs.
 - **`dependabot`** — reads `dependabot/fetch-metadata`, then either enables auto-merge or posts a "⚠️ Review required" comment.
-- **`claude-review`** — an *advisory* Claude compatibility assessment. Not a gate; callers' rulesets generally require only `build` and `workflow-lint`.
+- **`claude-review`** — an *advisory* Claude compatibility assessment. Not a gate; callers' rulesets generally require only `build` and `workflow-lint`. Its condition is a **job-level `if:`** that reads the `dependabot` job's `update-type` / `compatibility-score` outputs, so on patch/minor PRs the job is skipped outright. Keep it there, not on steps: a skipped job bills 0 Actions minutes, while a job that starts and skips every step bills a full minute.
 
 ### The two risk conditions are exact complements
 
@@ -70,7 +70,7 @@ Under `--json-schema`, a run that starts but produces no verdict calls `core.set
 
 A hand-authored PR cannot exercise this job at all. Callers gate the whole reusable workflow on `github.event.pull_request.user.login == 'dependabot[bot]'`, and relaxing that doesn't help — `dependabot/fetch-metadata` errors outside a Dependabot PR context, failing the job `claude-review` needs.
 
-To exercise it now rather than waiting for the daily schedule, comment `@dependabot recreate` on an existing Dependabot PR in a caller. Dependabot re-resolves to this repo's current `main` HEAD, and because the resulting PR changes a workflow file, it exercises the validation-skip path too.
+To exercise it now rather than waiting for the weekly schedule, comment `@dependabot recreate` on an existing Dependabot PR in a caller. Dependabot re-resolves to this repo's current `main` HEAD, and because the resulting PR changes a workflow file, it exercises the validation-skip path too.
 
 ## Releases
 
@@ -105,7 +105,7 @@ Mechanics worth knowing:
 
 ## Propagation to callers
 
-Callers pin by **commit SHA**, so a merge to `main` reaches nobody until each caller's Dependabot bumps its pin. Their `.github/dependabot.yml` files exempt `HillwoodPark/*` from the 3-day supply-chain cooldown specifically so these pin bumps propagate within a day instead of by hand.
+Callers pin by **commit SHA**, so a merge to `main` reaches nobody until each caller's Dependabot bumps its pin. Their `.github/dependabot.yml` files run weekly (Mondays) and exempt `HillwoodPark/*` from the 3-day supply-chain cooldown, so a release reaches every caller at its next weekly run instead of by hand. They also keep `HillwoodPark/*` out of their grouped `github-actions` PR, so the pin bump arrives as its own PR: `auto-merge-digest` matches on its title, and a `release:major` bump stays individually held.
 
 How Dependabot treats a SHA-pinned reusable workflow (verified against `dependabot-core`'s `github_actions` package, 2026-09):
 

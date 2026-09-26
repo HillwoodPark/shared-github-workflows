@@ -5,10 +5,20 @@ updates:
   # most — a stale/compromised action here propagates to every caller.
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Weekly and grouped: every merge here cuts a release that lands as a bump PR in
+    # each caller, so batching bumps into one weekly PR cuts billed runs downstream.
     schedule:
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
     # Supply-chain cooldown: hold new releases 3 days (first-party HillwoodPark exempt)
     cooldown:
       default-days: 3
       exclude:
         - "HillwoodPark/*"
+    # Minor/patch bumps ride together; majors stay individual PRs so they still get
+    # reviewed. First-party refs stay out of the group, matching the callers' config.
+    groups:
+      github-actions:
+        patterns: ["*"]
+        exclude-patterns: ["HillwoodPark/*"]
+        update-types: ["minor", "patch"]
