@@ -126,6 +126,10 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
+    # Read by claude-review's job-level `if:`.
+    outputs:
+      update-type: ${{ steps.dependabot-metadata.outputs.update-type }}
+      compatibility-score: ${{ steps.dependabot-metadata.outputs.compatibility-score }}
     env:
       PR_URL: ${{ github.event.pull_request.html_url }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -205,6 +209,16 @@ jobs:
 
   claude-review:
     needs: [dependabot]
+    # Gate the job, not its steps: a skipped job bills 0 Actions minutes, but a job
+    # that starts and then skips every step still bills a full minute on each PR.
+    if: >-
+      ${{
+        needs.dependabot.outputs.update-type == 'version-update:semver-major' ||
+        (
+          needs.dependabot.outputs.compatibility-score > 0 &&
+          needs.dependabot.outputs.compatibility-score < 75
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -227,14 +241,6 @@ jobs:
       # structured_output"). This turns that into a clear, actionable message.
       - name: Verify Anthropic API key is usable
         id: anthropic-preflight
-        if: >-
-          ${{
-            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
-            (
-              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
-              steps.dependabot-metadata.outputs.compatibility-score < 75
-            )
-          }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -269,14 +275,6 @@ jobs:
           exit 1
       - name: Claude compatibility assessment
         id: analyze
-        if: >-
-          ${{
-            steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' ||
-            (
-              steps.dependabot-metadata.outputs.compatibility-score > 0 &&
-              steps.dependabot-metadata.outputs.compatibility-score < 75
-            )
-          }}
         uses: anthropics/claude-code-action@7b0b255830a1fab6e602658672acad11c12d841d # v1.0.226
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
